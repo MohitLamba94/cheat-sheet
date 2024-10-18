@@ -64,7 +64,7 @@ chmod -R 777 /home/jack/
 Conda commands
 '''
 conda info --envs
-conda create -p /mnt/s1/workspace/anaconda/envs/py171 --clone myenv
+conda create -p /anaconda/envs/py171 --clone myenv
 conda list
 conda remove --name myenv --all
 
