@@ -95,3 +95,8 @@ df.insert(PosIndex, 'NewColumn', NewValue)
 
 df['Column'] = df['Column'].str.replace('str1','str2')
 
+'''
+Python House Keeping
+'''
+shutil.rmtree(title,ignore_errors=True)
+
