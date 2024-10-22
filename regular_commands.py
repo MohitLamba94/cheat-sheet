@@ -100,3 +100,18 @@ Python House Keeping
 '''
 shutil.rmtree(title,ignore_errors=True)
 
+class Example:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+obj = Example(10, 20)
+
+print("dir(obj):", dir(obj))
+print("vars(obj):", vars(obj))
+'''
+dir(obj): ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 'x', 'y']
+vars(obj): {'x': 10, 'y': 20}
+'''
+
+
