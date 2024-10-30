@@ -96,6 +96,12 @@ df.insert(PosIndex, 'NewColumn', NewValue)
 df['Column'] = df['Column'].str.replace('str1','str2')
 
 '''
+HuggingFace
+'''
+huggingface-cli download bert-base-uncased
+# execute this command in terminal to download the specified HF model
+
+'''
 Python House Keeping
 '''
 shutil.rmtree(title,ignore_errors=True)
