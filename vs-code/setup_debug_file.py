@@ -15,7 +15,7 @@
             "justMyCode": true,
             "cwd": "/path/to/directory/",
             "args": ["--outdir","runs/understand", "--data","/path/to/directory", "--gpus","1", "--cond","0", "--gamma=1.0", "--workers","1", "--batch","8"],
-            "pythonPath": "/path/to/your/conda/env/bin/python"
+            "pythonPath": "/path/to/miniconda3/envs/env-name/bin/python"
         }
     ]
 }
