@@ -11,7 +11,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "env": {"CUDA_VISIBLE_DEVICES":"1"}
+            "env": {"CUDA_VISIBLE_DEVICES":"1"},
             "justMyCode": true,
             "cwd": "/path/to/directory/",
             "args": ["--outdir","runs/understand", "--data","/path/to/directory", "--gpus","1", "--cond","0", "--gamma=1.0", "--workers","1", "--batch","8"],
