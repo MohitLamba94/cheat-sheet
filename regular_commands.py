@@ -115,9 +115,28 @@ obj = Example(10, 20)
 
 print("dir(obj):", dir(obj))
 print("vars(obj):", vars(obj))
+#dir(obj): ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 'x', 'y']
+#vars(obj): {'x': 10, 'y': 20}
+
+
 '''
-dir(obj): ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__str__', '__subclasshook__', '__weakref__', 'x', 'y']
-vars(obj): {'x': 10, 'y': 20}
+How to set up a infinite dataloader in PyTorch
 '''
+def cycle(dl):
+    while True:
+        for batch in dl:
+            yield batch
+
+self.dl = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
+
+dl = cycle(self.dl)
+for ind in range(self.num_train_steps):
+    data = next(dl)
+    # inputs, targets = data
+    # outputs = model(inputs)
+    # loss = criterion(outputs, targets)
+    # loss.backward()
+    # optimizer.step()
+
 
 
