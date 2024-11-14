@@ -138,5 +138,14 @@ for ind in range(self.num_train_steps):
     # loss.backward()
     # optimizer.step()
 
+'''
+How to convert a batch(or more dim!) of PyTorch Images to a single large image
+something like torchutils.make_grid() but with more flexibity in dimensions
+'''
+images.shape = (16,3,32,32)
+
+from einops import rearrange, repeat
+image = rearrange(images, '(row col) c h w -> c (row h) (col w)', row = desired_number_of_rows)
+
 
 
