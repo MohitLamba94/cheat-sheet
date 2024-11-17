@@ -22,7 +22,8 @@ class RectifiedFlow(Module):
                  clip_flow_during_sampling,
                  clip_flow_values,
                  loss_fn, 
-                 data_shape
+                 data_shape,
+                 forward_time_sampling
                  ):
         super().__init__()
 
@@ -46,6 +47,7 @@ class RectifiedFlow(Module):
         # sampling
         self.odeint_kwargs = dict(atol = 1e-5, rtol = 1e-5, method = 'dopri5')
         self.data_shape = data_shape
+        self.forward_time_sampling = forward_time_sampling
 
         # clipping for epsilon prediction
         self.clip_during_sampling = clip_during_sampling
@@ -98,7 +100,11 @@ class RectifiedFlow(Module):
         z0 = torch.randn_like(data)
         flow = data - z0
 
-        times = torch.rand(data.shape[0], device = self.device)
+        if self.forward_time_sampling=="logit_normal":
+            times = torch.randn(data.shape[0], device = self.device)
+            times = 1 / (1 + torch.exp(-times))
+        else:
+            times = torch.rand(data.shape[0], device = self.device)
         padded_times = append_dims(times, data.ndim - 1)
 
         z = padded_times * data + (1. - padded_times) * z0
@@ -145,7 +151,8 @@ class Trainer(Module):
         clip_flow_values = (-3.,3.),
         loss_fn: str = "VGGLoss_MSE",
         data_shape = (3,32,32),
-        dataset="mnist"
+        dataset="mnist",
+        forward_time_sampling="logit_normal"
     ):
         super().__init__()
 
@@ -188,7 +195,7 @@ class Trainer(Module):
         self.accelerator = Accelerator(log_with="tensorboard", project_dir=str(exp_folder))
         self.accelerator.init_trackers(f"logs")
 
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape)
+        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling)
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -295,16 +302,16 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/mnist_trial",
+        exp_folder= "rectified_flow_2022/exp2-VGG_MSE-logit_normal",
         num_train_steps = 1000_000,
-        batch_size = 2,
-        save_results_every = 10,
-        checkpoint_every = 10,
+        batch_size = 256,
+        save_results_every = 1000,
+        checkpoint_every = 10000,
         num_samples = 16,
         ode_sample_steps = 100,
         unet_dim = 64,
         use_ema = True,
-        ema_update_after_step = 100,
+        ema_update_after_step = 1000,
         ema_update_every = 10,
         ema_beta = 0.999,
         lr = 1e-4,
@@ -313,8 +320,9 @@ if __name__ == "__main__":
         clip_flow_during_sampling = False,
         clip_flow_values = (-3.,3.),
         loss_fn = "VGGLoss_MSE",
-        data_shape = (1,28,28),
-        dataset = "mnist"
+        data_shape = (3,32,32),
+        dataset = "cifar10",
+        forward_time_sampling="logit_normal"
     )
 
     trainer = Trainer(**train_dict)
