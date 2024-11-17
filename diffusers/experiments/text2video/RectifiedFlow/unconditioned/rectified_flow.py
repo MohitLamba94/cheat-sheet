@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from helper_functions_and_lossess import *
 from model import Unet
-from dataset import trainset
+from dataset import *
 
 
 class RectifiedFlow(Module):
@@ -20,20 +20,32 @@ class RectifiedFlow(Module):
                  model:dict|Module,
                  clip_during_sampling,
                  clip_flow_during_sampling,
-                 clip_flow_values
-
+                 clip_flow_values,
+                 loss_fn, 
+                 data_shape
                  ):
         super().__init__()
 
         if isinstance(model, dict):
+            cc,hh,ww = data_shape
+            dim_mults = [1]
+            for res in [2,4,8]:
+                if hh%res==0 and ww%res==0:
+                    dim_mults.append(res)
+                else:
+                    break
+            model["dim_mults"] = tuple(dim_mults)
             model = Unet(**model)
 
         self.model = model
-        self.loss_fn = LPIPSLoss_MSE()#MSELoss()
+        if loss_fn=="VGGLoss_MSE":
+            self.loss_fn = VGGLoss_MSE()
+        else:
+            self.loss_fn = MSELoss()
 
         # sampling
-        self.odeint_kwargs = dict(atol = 1e-5, rtol = 1e-5, method = 'midpoint')
-        self.data_shape = (3,32,32)
+        self.odeint_kwargs = dict(atol = 1e-5, rtol = 1e-5, method = 'dopri5')
+        self.data_shape = data_shape
 
         # clipping for epsilon prediction
         self.clip_during_sampling = clip_during_sampling
@@ -130,7 +142,10 @@ class Trainer(Module):
         adam_weight_decay = 0,
         clip_during_sampling = True,
         clip_flow_during_sampling = False,
-        clip_flow_values = (-3.,3.)
+        clip_flow_values = (-3.,3.),
+        loss_fn: str = "VGGLoss_MSE",
+        data_shape = (3,32,32),
+        dataset="mnist"
     ):
         super().__init__()
 
@@ -173,7 +188,7 @@ class Trainer(Module):
         self.accelerator = Accelerator(log_with="tensorboard", project_dir=str(exp_folder))
         self.accelerator.init_trackers(f"logs")
 
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values)
+        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape)
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -188,7 +203,10 @@ class Trainer(Module):
             self.ema_model.to(self.accelerator.device)
 
         self.optimizer = Adam(self.model.model.parameters(), lr = lr, weight_decay=adam_weight_decay)
-        self.dl = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+        if dataset == "cifar10":
+            self.dl = DataLoader(cifar10_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+        elif dataset == "mnist":
+            self.dl = DataLoader(mnist_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
         self.model, self.optimizer, self.dl = self.accelerator.prepare(self.model, self.optimizer, self.dl)       
             
 
@@ -277,11 +295,11 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/exp2-LPIPS_MSE",
+        exp_folder= "rectified_flow_2022/mnist_trial",
         num_train_steps = 1000_000,
-        batch_size = 256,
-        save_results_every = 1000,
-        checkpoint_every = 10000,
+        batch_size = 2,
+        save_results_every = 10,
+        checkpoint_every = 10,
         num_samples = 16,
         ode_sample_steps = 100,
         unet_dim = 64,
@@ -289,11 +307,14 @@ if __name__ == "__main__":
         ema_update_after_step = 100,
         ema_update_every = 10,
         ema_beta = 0.999,
-        lr = 2e-4,
+        lr = 1e-4,
         adam_weight_decay = 0,
         clip_during_sampling = False,
         clip_flow_during_sampling = False,
-        clip_flow_values = (-3.,3.)
+        clip_flow_values = (-3.,3.),
+        loss_fn = "VGGLoss_MSE",
+        data_shape = (1,28,28),
+        dataset = "mnist"
     )
 
     trainer = Trainer(**train_dict)

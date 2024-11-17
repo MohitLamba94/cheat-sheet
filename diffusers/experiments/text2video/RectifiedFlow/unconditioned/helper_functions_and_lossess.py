@@ -41,6 +41,7 @@ def append_dims(t, ndims):
     shape = t.shape
     return t.reshape(*shape, *((1,) * ndims))
 
+
 # normalizing helpers
 
 def normalize_to_neg_one_to_one(img):
@@ -65,6 +66,13 @@ class LPIPSLoss_MSE(Module):
     def forward(self, pred_data, data):
         return self.loss_fn_vgg(pred_data, data), F.mse_loss(pred_data, data)
 
+class VGGLoss_MSE(Module):
+    def __init__(self):
+        super().__init__()
+        self.loss_fn_vgg = VGGLoss()
+    def forward(self, pred_data, data):
+        return self.loss_fn_vgg(pred_data, data), F.mse_loss(pred_data, data)
+
 class LPIPSLoss(Module):
     def __init__(
         self,
@@ -83,6 +91,41 @@ class LPIPSLoss(Module):
     def forward(self, pred_data, data, reduction = 'mean'):
         vgg, = self.vgg
         vgg = vgg.to(data.device)
+
+        pred_embed = vgg(pred_data)
+        with torch.no_grad():
+            embed = vgg(data)
+
+        loss = F.mse_loss(embed, pred_embed, reduction = reduction)
+
+        if reduction == 'none':
+            loss = reduce(loss, 'b ... -> b', 'mean')
+
+        return loss
+    
+class VGGLoss(Module):
+    def __init__(
+        self,
+        vgg: Module | None = None,
+        vgg_weights: VGG16_Weights = VGG16_Weights.DEFAULT,
+    ):
+        super().__init__()
+
+        if not exists(vgg):
+            vgg = torchvision.models.vgg16(weights = vgg_weights).features[:10]
+            vgg.requires_grad_(False)
+
+        self.vgg = [vgg]
+
+    def forward(self, pred_data, data, reduction = 'mean'):
+        vgg, = self.vgg
+        vgg = vgg.eval()
+        vgg = vgg.to(data.device) # Accelerator should automatically handle this
+
+        bb,cc,hh,ww = data.shape
+        if cc==1:
+            pred_data = pred_data.repeat(1,3,1,1)
+            data = data.repeat(1,3,1,1)
 
         pred_embed = vgg(pred_data)
         with torch.no_grad():

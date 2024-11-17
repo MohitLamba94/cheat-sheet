@@ -334,6 +334,10 @@ class Unet(Module):
         return 2 ** (len(self.downs) - 1)
 
     def forward(self, x, times):
+        bb,cc,hh,ww = x.shape
+        if cc==1:
+            x = x.repeat(1,3,1,1)
+
         assert all([divisible_by(d, self.downsample_factor) for d in x.shape[-2:]]), f'your input dimensions {x.shape[-2:]} need to be divisible by {self.downsample_factor}, given the unet'
 
         x = self.init_conv(x)
@@ -370,7 +374,14 @@ class Unet(Module):
         x = torch.cat((x, r), dim = 1)
 
         x = self.final_res_block(x, t)
-        return self.final_conv(x)
+
+        final_return = self.final_conv(x)
+
+        if cc==1:
+            final_return = final_return[:,0:1,:,:]
+
+        assert final_return.shape == (bb,cc,hh,ww), f"{final_return.shape} == {(bb,cc,hh,ww)}"
+        return final_return
     
 if __name__ == "__main__":
     model = Unet(dim=64).cuda()
