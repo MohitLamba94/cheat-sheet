@@ -43,6 +43,8 @@ class RectifiedFlow(Module):
         self.model = model
         if loss_fn=="VGGLoss_MSE":
             self.loss_fn = VGGLoss_MSE()
+        elif loss_fn=="VGGLossonData_MSEonFlow":
+            self.loss_fn = VGGLossonData_MSEonFlow()
         else:
             self.loss_fn = MSELoss()
 
@@ -113,7 +115,7 @@ class RectifiedFlow(Module):
 
         pred_flow = self.predict_flow(z, times)
 
-        lpips_loss, mse_loss = self.loss_fn(pred_flow, flow)
+        lpips_loss, mse_loss = self.loss_fn(pred_flow, flow, z, padded_times, data)
         main_loss = (lpips_loss+mse_loss)/2
         return main_loss, {"lpips_loss":lpips_loss.item(), "mse_loss":mse_loss.item(), "main_loss": main_loss.item(), "gt_flow_max": flow.max().item(), "gt_flow_min": flow.min().item()}
 
@@ -151,7 +153,7 @@ class Trainer(Module):
         clip_during_sampling = True,
         clip_flow_during_sampling = False,
         clip_flow_values = (-3.,3.),
-        loss_fn: str = "VGGLoss_MSE",
+        loss_fn: str = "VGGLossonData_MSEonFlow",
         data_shape = (3,32,32),
         dataset="mnist",
         forward_time_sampling="logit_normal",
@@ -325,7 +327,7 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/exp2-VGG_MSE-logit_normal-bigger_model-LinearDecayWithWarmup",
+        exp_folder= "rectified_flow_2022/exp2-VGGLossonData_MSEonFlow-logit_normal-bigger_model-LinearDecayWithWarmup",
         num_train_steps = 400_000,
         batch_size = 256,
         save_results_every = 1000,
@@ -342,7 +344,7 @@ if __name__ == "__main__":
         clip_during_sampling = False,
         clip_flow_during_sampling = False,
         clip_flow_values = (-3.,3.),
-        loss_fn = "VGGLoss_MSE",
+        loss_fn = "VGGLossonData_MSEonFlow",
         data_shape = (3,32,32),
         dataset = "cifar10",
         forward_time_sampling="logit_normal",
