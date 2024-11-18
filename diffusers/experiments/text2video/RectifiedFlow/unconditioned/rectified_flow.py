@@ -13,6 +13,8 @@ from tqdm import tqdm
 from helper_functions_and_lossess import *
 from model import Unet
 from dataset import *
+from lr_schedulers import *
+from torch.optim.lr_scheduler import ConstantLR
 
 
 class RectifiedFlow(Module):
@@ -152,7 +154,11 @@ class Trainer(Module):
         loss_fn: str = "VGGLoss_MSE",
         data_shape = (3,32,32),
         dataset="mnist",
-        forward_time_sampling="logit_normal"
+        forward_time_sampling="logit_normal",
+        lr_scheduler = None,
+        increase_iters=1000, 
+        base_lr=1e-8, 
+        max_lr=5e-4
     ):
         super().__init__()
 
@@ -209,12 +215,28 @@ class Trainer(Module):
             )
             self.ema_model.to(self.accelerator.device)
 
-        self.optimizer = Adam(self.model.model.parameters(), lr = lr, weight_decay=adam_weight_decay)
+        if lr_scheduler is None:
+            lr = lr
+        else:
+            lr = base_lr
+
+        self.optimizer = Adam(self.model.model.parameters(), lr=lr, weight_decay=adam_weight_decay)
+        
         if dataset == "cifar10":
             self.dl = DataLoader(cifar10_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
         elif dataset == "mnist":
             self.dl = DataLoader(mnist_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
-        self.model, self.optimizer, self.dl = self.accelerator.prepare(self.model, self.optimizer, self.dl)       
+        elif dataset == "fashion_mnist":
+            self.dl = DataLoader(fashion_mnist_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+        elif dataset == "cifar10_grayscale":
+            self.dl = DataLoader(cifar10_grayscale_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+        
+        if lr_scheduler == "LinearDecayWithWarmup":        
+            self.scheduler = LinearDecayWithWarmup(optimizer=self.optimizer, total_iters=num_train_steps, increase_iters=increase_iters, base_lr=base_lr, max_lr=max_lr, last_epoch=-1)  
+        else:
+            self.scheduler = ConstantLR(self.optimizer, factor=1.0, total_iters=num_train_steps)
+         
+        self.model, self.optimizer, self.dl, self.scheduler = self.accelerator.prepare(self.model, self.optimizer, self.dl, self.scheduler)       
             
 
     @property
@@ -272,15 +294,16 @@ class Trainer(Module):
             loss, log_dict = self.model(data[0])
 
             self.accelerator.backward(loss)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.scheduler.step()
+
             progress_bar.update(1)
             if self.is_main:
                 progress_bar.set_postfix({"mse": log_dict['mse_loss'], "vgg": log_dict["lpips_loss"]})
                 if step%100==0:
-                    self.log(log_dict, step = step)
-
-
-            self.optimizer.step()
-            self.optimizer.zero_grad()
+                    log_dict['lr'] = self.scheduler.get_last_lr()[0]
+                    self.log(log_dict, step = step)            
 
             if self.is_main and self.use_ema:
                 self.ema_model.update()
@@ -302,16 +325,16 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/exp2-VGG_MSE-logit_normal",
-        num_train_steps = 1000_000,
+        exp_folder= "rectified_flow_2022/exp2-VGG_MSE-logit_normal-bigger_model-LinearDecayWithWarmup",
+        num_train_steps = 400_000,
         batch_size = 256,
         save_results_every = 1000,
         checkpoint_every = 10000,
         num_samples = 16,
         ode_sample_steps = 100,
-        unet_dim = 64,
+        unet_dim = 128,
         use_ema = True,
-        ema_update_after_step = 1000,
+        ema_update_after_step = 45_000,
         ema_update_every = 10,
         ema_beta = 0.999,
         lr = 1e-4,
@@ -322,7 +345,11 @@ if __name__ == "__main__":
         loss_fn = "VGGLoss_MSE",
         data_shape = (3,32,32),
         dataset = "cifar10",
-        forward_time_sampling="logit_normal"
+        forward_time_sampling="logit_normal",
+        lr_scheduler = "LinearDecayWithWarmup",
+        increase_iters=45_000, 
+        base_lr=1e-8, 
+        max_lr=5e-4
     )
 
     trainer = Trainer(**train_dict)

@@ -27,7 +27,10 @@ class Trainer(Module):
         ema_beta = 0.90,
         clip_during_sampling = True,
         clip_flow_during_sampling = False,
-        clip_flow_values = (-3.,3.)
+        clip_flow_values = (-3.,3.),
+        loss_fn: str = "VGGLoss_MSE",
+        data_shape = (3,32,32),
+        forward_time_sampling="logit_normal"
     ):
         super().__init__()
 
@@ -47,7 +50,7 @@ class Trainer(Module):
 
         ### CORE
         
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values).cuda()
+        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling).cuda()
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -73,6 +76,7 @@ class Trainer(Module):
     def sample(self, fname):
         eval_model = default(self.ema_model, self.model)
         with torch.no_grad():
+            # eval_model.eval()
             sampled = eval_model.sample(batch_size=self.num_samples, steps=self.ode_sample_steps)
       
         sampled = rearrange(sampled, '(row col) c h w -> c (row h) (col w)', row = self.num_sample_rows)
@@ -89,18 +93,21 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/exp2-LPIPS_MSE",
-        ckpt=150_000,
+        exp_folder= "rectified_flow_2022/mnist_exp1",
+        ckpt=38_000,
         num_samples = 64,
-        ode_sample_steps = 1000,
-        unet_dim = 64,
+        ode_sample_steps= 100,
+        unet_dim= 64,
         use_ema = False,
-        ema_update_after_step = 100,
-        ema_update_every = 10,
-        ema_beta = 0.999,
-        clip_during_sampling = False,
+        ema_update_after_step=100,
+        ema_update_every=10,
+        ema_beta = 0.90,
+        clip_during_sampling = True,
         clip_flow_during_sampling = False,
-        clip_flow_values = (-3.,3.)
+        clip_flow_values = (-3.,3.),
+        loss_fn= "VGGLoss_MSE",
+        data_shape = (1,28,28),
+        forward_time_sampling="logit_normal"
     )
 
     trainer = Trainer(**train_dict)

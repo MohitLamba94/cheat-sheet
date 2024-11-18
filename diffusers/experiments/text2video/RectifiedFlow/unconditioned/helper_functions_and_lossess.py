@@ -187,7 +187,3 @@ class MSEAndDirectionLoss(Module):
         direction_loss = (1. - F.cosine_similarity(pred, target, dim = self.cosine_sim_dim)).mean()
 
         return mse_loss + direction_loss
-
-# loss breakdown
-
-LossBreakdown = namedtuple('LossBreakdown', ['total', 'main', 'data_match', 'velocity_match'])
