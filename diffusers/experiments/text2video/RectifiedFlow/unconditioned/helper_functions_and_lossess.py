@@ -86,6 +86,15 @@ class VGGLossonData_MSEonFlow(Module):
                   = X
         '''
         return self.loss_fn_vgg(pred_data, data), F.mse_loss(pred_flow, flow)
+    
+class VGGLossonData_MSEonFlow2(Module):
+    def __init__(self):
+        super().__init__()
+        self.loss_fn_vgg = VGGLoss()
+
+    def forward(self, pred_flow, flow, z, padded_times, data):
+        pred_data = z + (pred_flow*(1. - padded_times))
+        return (0.2*self.loss_fn_vgg(pred_data, data)) + (0.8*F.l1_loss(pred_data, data)), F.mse_loss(pred_flow, flow)
 
 class LPIPSLoss(Module):
     def __init__(
