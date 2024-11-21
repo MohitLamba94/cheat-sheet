@@ -25,7 +25,9 @@ class RectifiedFlow(Module):
                  clip_flow_values,
                  loss_fn, 
                  data_shape,
-                 forward_time_sampling
+                 forward_time_sampling,
+                 use_VAE,
+                 vae_latent_norm_factor
                  ):
         super().__init__()
 
@@ -38,9 +40,19 @@ class RectifiedFlow(Module):
                 else:
                     break
             model["dim_mults"] = tuple(dim_mults)
+            if cc not in [1,3]:
+                model["channels"] = cc
             model = Unet(**model)
 
         self.model = model
+        if use_VAE:
+            self.vae_latent_norm_factor = vae_latent_norm_factor
+            from diffusers import AutoencoderKL
+            self.vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae", use_safetensors=True)
+            self.vae.requires_grad_(False)
+        else:
+            self.vae = None
+
         if loss_fn=="VGGLoss_MSE":
             self.loss_fn = VGGLoss_MSE()
         # elif loss_fn=="VGGLossonData_MSEonFlow":
@@ -48,7 +60,7 @@ class RectifiedFlow(Module):
         elif loss_fn=="VGGLossonData_MSEonFlow2":
             self.loss_fn = VGGLossonData_MSEonFlow2()
         else:
-            self.loss_fn = MSELoss()
+            self.loss_fn = MyMSE()
 
         # sampling
         self.odeint_kwargs = dict(atol = 1e-5, rtol = 1e-5, method = 'dopri5')
@@ -96,13 +108,22 @@ class RectifiedFlow(Module):
         times = torch.linspace(0., 1., steps, device = self.device)
         trajectory = odeint(ode_fn, z0, times, **self.odeint_kwargs)
         sampled_data = trajectory[-1]
+        if self.vae is not None:
+            with torch.no_grad():
+                self.vae.eval()
+                sampled_data = self.vae.decode(sampled_data/self.vae_latent_norm_factor).sample
 
         self.train(was_training)
-        return self.data_unnormalize_fn(sampled_data)
+        return self.data_unnormalize_fn(sampled_data).clamp(0,1)
 
     def forward(self,data):
         
         data = self.data_normalize_fn(data)
+        if self.vae is not None:
+            with torch.no_grad():
+                self.vae.eval()
+                data = self.vae_latent_norm_factor * self.vae.encode(data).latent_dist.sample()
+
         z0 = torch.randn_like(data)
         flow = data - z0
 
@@ -162,7 +183,9 @@ class Trainer(Module):
         lr_scheduler = None,
         increase_iters=1000, 
         base_lr=1e-8, 
-        max_lr=5e-4
+        max_lr=5e-4,
+        use_VAE = True,
+        vae_latent_norm_factor = 0.18
     ):
         super().__init__()
 
@@ -205,7 +228,7 @@ class Trainer(Module):
         self.accelerator = Accelerator(log_with="tensorboard", project_dir=str(exp_folder))
         self.accelerator.init_trackers(f"logs")
 
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling)
+        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling, use_VAE, vae_latent_norm_factor)
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -234,6 +257,8 @@ class Trainer(Module):
             self.dl = DataLoader(fashion_mnist_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
         elif dataset == "cifar10_grayscale":
             self.dl = DataLoader(cifar10_grayscale_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
+        elif dataset == "celebA":
+            self.dl = DataLoader(celeba_trainset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=True)
         
         if lr_scheduler == "LinearDecayWithWarmup":        
             self.scheduler = LinearDecayWithWarmup(optimizer=self.optimizer, total_iters=num_train_steps, increase_iters=increase_iters, base_lr=base_lr, max_lr=max_lr, last_epoch=-1)  
@@ -305,9 +330,10 @@ class Trainer(Module):
 
             progress_bar.update(1)
             if self.is_main:
-                progress_bar.set_postfix({"mse": log_dict['mse_loss'], "vgg": log_dict["lpips_loss"]})
+                last_lr = self.scheduler.get_last_lr()[0]
+                progress_bar.set_postfix({"mse": log_dict['mse_loss'], "vgg": log_dict["lpips_loss"], "lr": last_lr})
                 if step%100==0:
-                    log_dict['lr'] = self.scheduler.get_last_lr()[0]
+                    log_dict['lr'] = last_lr
                     self.log(log_dict, step = step)            
 
             if self.is_main and self.use_ema:
@@ -330,32 +356,33 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/exp2-VGGLossonData_MSEonFlow2_20_80-logit_normal-bigger_model-LinearDecayWithWarmup",
-        num_train_steps= 400_000,
-        batch_size= 256,
-        save_results_every= 1000,
-        checkpoint_every= 10_000,
-        num_samples= 16,
-        ode_sample_steps= 100,
-        unet_dim= 128,
-        use_ema= True,
-        ema_update_after_step= 1000,
-        ema_update_every= 10,
-        ema_beta= 0.999,
-        lr= 1e-4,
-        adam_weight_decay= 0,
-        clip_during_sampling= False,
-        clip_flow_during_sampling= False,
-        clip_flow_values= (-3.0, 3.0),
-        loss_fn= "VGGLossonData_MSEonFlow2",
-        data_shape= (3, 32, 32),
-        dataset= "cifar10",
-        forward_time_sampling= "logit_normal",
-        lr_scheduler= "LinearDecayWithWarmup",
-        increase_iters= 45_000,
-        base_lr= 1e-08,
-        max_lr= 0.0005,
-
+        exp_folder= "rectified_flow_2022/Celebexp1-MyMSE-logit_normal-lighter_model-VAE-LatentNorm0_18",
+        num_train_steps = 100_000,
+        batch_size = 256,
+        save_results_every = 1000,
+        checkpoint_every = 10_000,
+        num_samples = 16,
+        ode_sample_steps = 100,
+        unet_dim = 64,
+        use_ema = True,
+        ema_update_after_step = 1000,
+        ema_update_every = 10,
+        ema_beta = 0.999,
+        lr = 1e-4,
+        adam_weight_decay = 0,
+        clip_during_sampling = False,
+        clip_flow_during_sampling = False,
+        clip_flow_values = (-3.0, 3.0),
+        loss_fn = "MyMSE",
+        data_shape = (4, 32, 32),
+        dataset = "celebA",
+        forward_time_sampling = "logit_normal",
+        lr_scheduler = None,
+        increase_iters = 40_000,
+        base_lr = 1e-08,
+        max_lr = 5e-4,
+        use_VAE = True,
+        vae_latent_norm_factor = 0.18
     )
 
     trainer = Trainer(**train_dict)

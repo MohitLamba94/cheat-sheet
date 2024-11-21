@@ -59,6 +59,24 @@ def cosmap(t):
 # losses
 
 
+class MSEData_MSEFlow_VAE(Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        pred_data = z + (pred_flow*(1. - padded_times))
+        pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
+        return F.mse_loss(pred_data, data), F.mse_loss(pred_flow, flow)
+    
+class MSEData_MSEFlow_L1img_VAE(Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        pred_data = z + (pred_flow*(1. - padded_times))
+        pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
+        pred_img = kwargs['vae'].decode(pred_data).sample
+        return F.mse_loss(pred_data, data), F.mse_loss(pred_flow, flow), F.l1_loss(pred_img, kwargs['gt_img'])
+
+
 class LPIPSLoss_MSE(Module):
     def __init__(self):
         super().__init__()
@@ -86,6 +104,14 @@ class VGGLossonData_MSEonFlow(Module):
                   = X
         '''
         return self.loss_fn_vgg(pred_data, data), F.mse_loss(pred_flow, flow)
+    
+
+class MyMSE(Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, pred_flow, flow, z, padded_times, data):
+        mse_loss = F.mse_loss(pred_flow, flow)
+        return 0*mse_loss, 2*mse_loss
     
 class VGGLossonData_MSEonFlow2(Module):
     def __init__(self):
