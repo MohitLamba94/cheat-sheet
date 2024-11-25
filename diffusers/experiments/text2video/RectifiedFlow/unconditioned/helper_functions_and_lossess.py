@@ -23,6 +23,9 @@ from einops.layers.torch import Rearrange
 
 from scipy.optimize import linear_sum_assignment
 
+from pytorch_msssim import SSIM
+import random
+
 
 # helpers
 
@@ -63,18 +66,69 @@ class MSEData_MSEFlow_VAE(Module):
     def __init__(self):
         super().__init__()
     def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        flow_loss = F.mse_loss(pred_flow, flow)
+
         pred_data = z + (pred_flow*(1. - padded_times))
         pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
-        return F.mse_loss(pred_data, data), F.mse_loss(pred_flow, flow)
+        data_loss = F.mse_loss(pred_data, data)
+
+        image_loss = 0*data_loss
+        return data_loss, flow_loss, image_loss 
     
 class MSEData_MSEFlow_L1img_VAE(Module):
     def __init__(self):
         super().__init__()
     def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        flow_loss = F.mse_loss(pred_flow, flow)
+
         pred_data = z + (pred_flow*(1. - padded_times))
         pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
+        data_loss = F.mse_loss(pred_data, data)
+
         pred_img = kwargs['vae'].decode(pred_data).sample
-        return F.mse_loss(pred_data, data), F.mse_loss(pred_flow, flow), F.l1_loss(pred_img, kwargs['gt_img'])
+        image_loss = F.l1_loss(pred_img, kwargs['gt_img'])
+        return data_loss, flow_loss, image_loss
+    
+class MSEData_MSEFlow_L1imgFewer_VAE(Module):
+    def __init__(self):
+        super().__init__()
+        self.ssim_module = SSIM(data_range=1, size_average=True, channel=3, nonnegative_ssim=True)
+
+    def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        flow_loss = F.mse_loss(pred_flow, flow)
+
+        pred_data = z + (pred_flow*(1. - padded_times))
+        pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
+        data_loss = F.mse_loss(pred_data, data)
+
+        # indices = torch.randperm(data.shape[0])[:32]
+        pred_data, gt_img = pred_data[:32], kwargs['gt_img'][:32]
+        pred_img = kwargs['vae'].decode(pred_data).sample
+        image_loss = 0.7*F.l1_loss(pred_img, gt_img) + 0.3*(1-self.ssim_module(unnormalize_to_zero_to_one(pred_img), unnormalize_to_zero_to_one(gt_img)))
+        return data_loss, flow_loss, image_loss
+    
+class MSEData_MSEFlow_L1imgFewerTiled_VAE(Module):
+    def __init__(self):
+        super().__init__()
+        self.ssim_module = SSIM(data_range=1, size_average=True, channel=3, nonnegative_ssim=True)
+
+    def forward(self, pred_flow, flow, z, padded_times, data, **kwargs):
+        flow_loss = F.mse_loss(pred_flow, flow)
+
+        pred_data = z + (pred_flow*(1. - padded_times))
+        pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
+        data_loss = F.mse_loss(pred_data, data)
+
+        x = random.randint(0, 256 - 128)
+        y = random.randint(0, 256 - 128)
+        gt_img = kwargs['gt_img'][:128, :, x:x+128, y:y+128]
+
+        x, y = x//8, y//8
+        pred_data = pred_data[:128, :, x:x+16, y:y+16]
+
+        pred_img = kwargs['vae'].decode(pred_data).sample
+        image_loss = 0.7*F.l1_loss(pred_img, gt_img) + 0.3*(1-self.ssim_module(unnormalize_to_zero_to_one(pred_img), unnormalize_to_zero_to_one(gt_img)))
+        return data_loss, flow_loss, image_loss
 
 
 class LPIPSLoss_MSE(Module):
@@ -102,6 +156,8 @@ class VGGLossonData_MSEonFlow(Module):
         pred_data = tX + (1-t)N + (X-N)(1-t)
                   = tX + (1-t)(X)
                   = X
+        also,
+        pd - d = (1-t)[pf - f]
         '''
         return self.loss_fn_vgg(pred_data, data), F.mse_loss(pred_flow, flow)
     
