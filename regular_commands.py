@@ -36,6 +36,21 @@ def print(*args):
         f.flush()
 
 '''
+Put text using PIL with white box
+'''
+from PIL import Image, ImageDraw, ImageFont
+image = Image.open(path)
+draw = ImageDraw.Draw(image)
+text = f"Some text goes here"
+font = ImageFont.truetype("FreeMono.ttf", 64)
+bbox = draw.textbbox((0, 0), text, font=font)
+text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+x, y = 10, 10  # 10 pixels from the right edge
+draw.rectangle([x, y, x + text_width, y + text_height], fill="white")
+draw.text((x, y), text, font=font, fill="black")
+image.save("img.jpg")
+
+'''
 Helpful terminal commands
 '''
 rsync -av --include='july11*/' --exclude='*' /source/path login-server:/destination/path/
