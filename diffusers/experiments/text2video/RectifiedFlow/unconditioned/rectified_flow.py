@@ -74,7 +74,7 @@ class RectifiedFlow(Module):
             self.loss_fn = MSEData_MSEFlow_L1imgFewer_VAE()
         elif loss_fn=="MSEData_MSEFlow_L1imgFewerTiled_VAE":
             self.loss_fn = MSEData_MSEFlow_L1imgFewerTiled_VAE()
-        elif loss_fn=="MSEData_MSEFNoise_VAE":
+        elif loss_fn=="MSEData_MSENoise_VAE":
             self.loss_fn = MSEData_MSENoise_VAE()
         else:
             self.loss_fn = MyMSE()
