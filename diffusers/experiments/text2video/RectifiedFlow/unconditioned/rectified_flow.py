@@ -16,13 +16,14 @@ from dataset import *
 from lr_schedulers import *
 from torch.optim.lr_scheduler import ConstantLR
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 
 class RectifiedFlow(Module):
     def __init__(self, 
                  model:dict|Module,
-                 clip_during_sampling,
-                 clip_flow_during_sampling,
-                 clip_flow_values,
+                 clip_values,
                  loss_fn, 
                  data_shape,
                  forward_time_sampling,
@@ -57,6 +58,10 @@ class RectifiedFlow(Module):
         else:
             self.vae = None
 
+        self.noise_predict = False
+        if "noise" in loss_fn.lower():
+            self.noise_predict = True
+
         if loss_fn=="VGGLoss_MSE":
             self.loss_fn = VGGLoss_MSE()
         elif loss_fn=="VGGLossonData_MSEonFlow2":
@@ -69,6 +74,8 @@ class RectifiedFlow(Module):
             self.loss_fn = MSEData_MSEFlow_L1imgFewer_VAE()
         elif loss_fn=="MSEData_MSEFlow_L1imgFewerTiled_VAE":
             self.loss_fn = MSEData_MSEFlow_L1imgFewerTiled_VAE()
+        elif loss_fn=="MSEData_MSEFNoise_VAE":
+            self.loss_fn = MSEData_MSENoise_VAE()
         else:
             self.loss_fn = MyMSE()
 
@@ -82,11 +89,7 @@ class RectifiedFlow(Module):
         self.forward_time_sampling = forward_time_sampling
 
         # clipping for epsilon prediction
-        self.clip_during_sampling = clip_during_sampling
-        self.clip_flow_during_sampling = clip_flow_during_sampling # this seems to help a lot when training with predict epsilon, at least for me
-
-        self.clip_values = (-1., 1.)
-        self.clip_flow_values = clip_flow_values
+        self.clip_values = clip_values
 
         # normalizing fn
         self.data_normalize_fn = normalize_to_neg_one_to_one
@@ -96,26 +99,37 @@ class RectifiedFlow(Module):
     def device(self):
         return next(self.model.parameters()).device
 
-    def predict_flow(self, z, times):
+    def predict_flow(self, z, times, clamp=True):
         times = rearrange(times, '... -> (...)')
         if times.numel() == 1:
-            times = repeat(times, '1 -> b', b = z.shape[0])
-        return self.model(z, times)
+            times = repeat(times, '1 -> b', b = z.shape[0])        
+        model_op = self.model(z, times)
+
+        if not self.noise_predict:
+            pred_flow = model_op
+        else:
+            times = append_dims(times,ndims=len(z.shape)-len(times.shape))
+            if self.clip_values is not None:
+                if clamp:
+                    model_op = model_op.clamp(*self.clip_values)
+            pred_flow = (z - model_op)/(times+1e-8)
+
+        return pred_flow, model_op
 
     @torch.no_grad()
     def sample(self, batch_size = 1, steps = 16):
 
         def ode_fn(t, z):
             z = maybe_clip(z)
-            flow = self.predict_flow(z, t)
+            flow, _ = self.predict_flow(z, t)
             flow = maybe_clip_flow(flow)
             return flow
         
         ### Non core 
         was_training = self.training
         self.eval()
-        maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_during_sampling else identity
-        maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_during_sampling else identity
+        maybe_clip = identity
+        maybe_clip_flow = identity
         
         ### core
         z0 = torch.randn((batch_size, *self.data_shape), device = self.device)
@@ -151,10 +165,13 @@ class RectifiedFlow(Module):
 
         z = padded_times * data + (1. - padded_times) * z0
 
-        pred_flow = self.predict_flow(z, times)
+        pred_flow, pred_noise = self.predict_flow(z, times, clamp=False)
 
         if self.vae:
-            data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, vae=self.vae, gt_img=gt_img)
+            if self.noise_predict:
+                data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, pred_noise=pred_noise, gt_noise=z0)
+            else:
+                data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, vae=self.vae, gt_img=gt_img)
         else:
             data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data)
         
@@ -200,9 +217,7 @@ class Trainer(Module):
         ema_beta = 0.90,
         lr = 3e-4,
         adam_weight_decay = 0,
-        clip_during_sampling = True,
-        clip_flow_during_sampling = False,
-        clip_flow_values = (-3.,3.),
+        clip_values = (-3.,3.),
         loss_fn: str = "VGGLossonData_MSEonFlow",
         data_shape = (3,32,32),
         dataset="mnist",
@@ -215,7 +230,7 @@ class Trainer(Module):
         vae_latent_norm_factor = 0.18,
         data_loss_factor = 0.5,
         flow_loss_factor = 0.5,
-        image_loss_factor = 0
+        image_loss_factor = 0,
     ):
         super().__init__()
 
@@ -258,7 +273,7 @@ class Trainer(Module):
         self.accelerator = Accelerator(log_with="tensorboard", project_dir=str(exp_folder))
         self.accelerator.init_trackers(f"logs")
 
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling, use_VAE, vae_latent_norm_factor, data_loss_factor, flow_loss_factor, image_loss_factor)
+        self.model = RectifiedFlow(dict(dim = unet_dim), clip_values, loss_fn, data_shape, forward_time_sampling, use_VAE, vae_latent_norm_factor, data_loss_factor, flow_loss_factor, image_loss_factor)
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -387,7 +402,7 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/Celebexp1-MSEData_MSEFlow_VAE-logit_normal-lighter_model-VAE-LatentNorm0_18-LinearDecayWithWarmup-400k",
+        exp_folder= "rectified_flow_2022/Celebexp1-MSEData_MSENoise_VAE-logit_normal-lighter_model-VAE-LatentNorm0_18-LinearDecayWithWarmup-400k",
         num_train_steps = 400_000,
         batch_size = 256,
         save_results_every = 1000,
@@ -401,10 +416,8 @@ if __name__ == "__main__":
         ema_beta = 0.999,
         lr = 1e-4,
         adam_weight_decay = 0,
-        clip_during_sampling = False,
-        clip_flow_during_sampling = False,
-        clip_flow_values = (-3.0, 3.0),
-        loss_fn = "MSEData_MSEFlow_VAE",
+        clip_values = (-3.0, 3.0),
+        loss_fn = "MSEData_MSENoise_VAE",
         data_shape = (4, 32, 32),
         dataset = "celebA",
         forward_time_sampling = "logit_normal",
