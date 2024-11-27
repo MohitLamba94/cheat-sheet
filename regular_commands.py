@@ -74,6 +74,9 @@ df -h
 
 chmod -R 777 /home/jack/
 
+watch -n 1 nvidia-smi
+# displays nvidia-smi every 1 sec
+
 
 '''
 Conda commands
