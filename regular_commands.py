@@ -53,6 +53,9 @@ image.save("img.jpg")
 '''
 Helpful terminal commands
 '''
+grep -rl "example" /home/user/documents
+# find all files in the /home/user/documents directory that contain the word "example"
+
 rsync -av --include='july11*/' --exclude='*' /source/path login-server:/destination/path/
 
 cp -r `ls -A | grep -v "dir2"` /home/sk/backup/
