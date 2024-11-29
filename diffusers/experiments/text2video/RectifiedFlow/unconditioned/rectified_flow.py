@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 from torch.nn import Module
 from torchdiffeq import odeint
 from torchvision.utils import save_image
@@ -15,15 +17,15 @@ from model import Unet
 from dataset import *
 from lr_schedulers import *
 from torch.optim.lr_scheduler import ConstantLR
-
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
+from models_DiT import DiT_models
 
 
 class RectifiedFlow(Module):
     def __init__(self, 
                  model:dict|Module,
-                 clip_values,
+                 clip_during_sampling,
+                 clip_flow_during_sampling,
+                 clip_flow_values,
                  loss_fn, 
                  data_shape,
                  forward_time_sampling,
@@ -36,17 +38,21 @@ class RectifiedFlow(Module):
         super().__init__()
 
         if isinstance(model, dict):
-            cc,hh,ww = data_shape
-            dim_mults = [1]
-            for res in [2,4,8]:
-                if hh%res==0 and ww%res==0:
-                    dim_mults.append(res)
-                else:
-                    break
-            model["dim_mults"] = tuple(dim_mults)
-            if cc not in [1,3]:
-                model["channels"] = cc
-            model = Unet(**model)
+            if model['name'] == "Unet":
+                model.pop('name')
+                cc,hh,ww = data_shape
+                dim_mults = [1]
+                for res in [2,4,8]:
+                    if hh%res==0 and ww%res==0:
+                        dim_mults.append(res)
+                    else:
+                        break
+                model["dim_mults"] = tuple(dim_mults)
+                if cc not in [1,3]:
+                    model["channels"] = cc
+                model = Unet(**model)
+            else:
+                model = DiT_models[model['name']]()
 
         self.model = model
         if use_VAE:
@@ -57,10 +63,6 @@ class RectifiedFlow(Module):
             # self.vae.enable_tiling()
         else:
             self.vae = None
-
-        self.noise_predict = False
-        if "noise" in loss_fn.lower():
-            self.noise_predict = True
 
         if loss_fn=="VGGLoss_MSE":
             self.loss_fn = VGGLoss_MSE()
@@ -74,8 +76,6 @@ class RectifiedFlow(Module):
             self.loss_fn = MSEData_MSEFlow_L1imgFewer_VAE()
         elif loss_fn=="MSEData_MSEFlow_L1imgFewerTiled_VAE":
             self.loss_fn = MSEData_MSEFlow_L1imgFewerTiled_VAE()
-        elif loss_fn=="MSEData_MSENoise_VAE":
-            self.loss_fn = MSEData_MSENoise_VAE()
         else:
             self.loss_fn = MyMSE()
 
@@ -89,7 +89,11 @@ class RectifiedFlow(Module):
         self.forward_time_sampling = forward_time_sampling
 
         # clipping for epsilon prediction
-        self.clip_values = clip_values
+        self.clip_during_sampling = clip_during_sampling
+        self.clip_flow_during_sampling = clip_flow_during_sampling # this seems to help a lot when training with predict epsilon, at least for me
+
+        self.clip_values = (-1., 1.)
+        self.clip_flow_values = clip_flow_values
 
         # normalizing fn
         self.data_normalize_fn = normalize_to_neg_one_to_one
@@ -99,37 +103,26 @@ class RectifiedFlow(Module):
     def device(self):
         return next(self.model.parameters()).device
 
-    def predict_flow(self, z, times, clamp=True):
+    def predict_flow(self, z, times):
         times = rearrange(times, '... -> (...)')
         if times.numel() == 1:
-            times = repeat(times, '1 -> b', b = z.shape[0])        
-        model_op = self.model(z, times)
-
-        if not self.noise_predict:
-            pred_flow = model_op
-        else:
-            times = append_dims(times,ndims=len(z.shape)-len(times.shape))
-            if self.clip_values is not None:
-                if clamp:
-                    model_op = model_op.clamp(*self.clip_values)
-            pred_flow = (z - model_op)/(times+1e-8)
-
-        return pred_flow, model_op
+            times = repeat(times, '1 -> b', b = z.shape[0])
+        return self.model(z, times)
 
     @torch.no_grad()
     def sample(self, batch_size = 1, steps = 16):
 
         def ode_fn(t, z):
             z = maybe_clip(z)
-            flow, _ = self.predict_flow(z, t)
+            flow = self.predict_flow(z, t)
             flow = maybe_clip_flow(flow)
             return flow
         
         ### Non core 
         was_training = self.training
         self.eval()
-        maybe_clip = identity
-        maybe_clip_flow = identity
+        maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_during_sampling else identity
+        maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_during_sampling else identity
         
         ### core
         z0 = torch.randn((batch_size, *self.data_shape), device = self.device)
@@ -165,13 +158,10 @@ class RectifiedFlow(Module):
 
         z = padded_times * data + (1. - padded_times) * z0
 
-        pred_flow, pred_noise = self.predict_flow(z, times, clamp=False)
+        pred_flow = self.predict_flow(z, times)
 
         if self.vae:
-            if self.noise_predict:
-                data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, pred_noise=pred_noise, gt_noise=z0)
-            else:
-                data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, vae=self.vae, gt_img=gt_img)
+            data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data, vae_latent_norm_factor=self.vae_latent_norm_factor, vae=self.vae, gt_img=gt_img)
         else:
             data_loss, flow_loss, image_loss = self.loss_fn(pred_flow, flow, z, padded_times, data)
         
@@ -210,14 +200,16 @@ class Trainer(Module):
         checkpoint_every: int = 1000,
         num_samples: int = 16,
         ode_sample_steps: int = 20,
-        unet_dim: int = 64,
+        model_kwargs = dict(name="Unet", dim=64),
         use_ema = True,
         ema_update_after_step: int=100,
         ema_update_every: int=10,
         ema_beta = 0.90,
         lr = 3e-4,
         adam_weight_decay = 0,
-        clip_values = (-3.,3.),
+        clip_during_sampling = True,
+        clip_flow_during_sampling = False,
+        clip_flow_values = (-3.,3.),
         loss_fn: str = "VGGLossonData_MSEonFlow",
         data_shape = (3,32,32),
         dataset="mnist",
@@ -230,7 +222,7 @@ class Trainer(Module):
         vae_latent_norm_factor = 0.18,
         data_loss_factor = 0.5,
         flow_loss_factor = 0.5,
-        image_loss_factor = 0,
+        image_loss_factor = 0
     ):
         super().__init__()
 
@@ -273,7 +265,7 @@ class Trainer(Module):
         self.accelerator = Accelerator(log_with="tensorboard", project_dir=str(exp_folder))
         self.accelerator.init_trackers(f"logs")
 
-        self.model = RectifiedFlow(dict(dim = unet_dim), clip_values, loss_fn, data_shape, forward_time_sampling, use_VAE, vae_latent_norm_factor, data_loss_factor, flow_loss_factor, image_loss_factor)
+        self.model = RectifiedFlow(model_kwargs, clip_during_sampling, clip_flow_during_sampling, clip_flow_values, loss_fn, data_shape, forward_time_sampling, use_VAE, vae_latent_norm_factor, data_loss_factor, flow_loss_factor, image_loss_factor)
 
         self.use_ema = use_ema
         self.ema_model = None
@@ -402,22 +394,24 @@ class Trainer(Module):
 if __name__ == "__main__":
 
     train_dict = dict(
-        exp_folder= "rectified_flow_2022/Celebexp1-MSEData_MSENoise_VAE-logit_normal-lighter_model-VAE-LatentNorm0_18-LinearDecayWithWarmup-400k",
+        exp_folder= "rectified_flow_2022/Celebexp1-MSEData_MSEFlow_VAE-logit_normal-DiT_B_2-VAE-LatentNorm0_18-LinearDecayWithWarmup-400k",
         num_train_steps = 400_000,
         batch_size = 256,
         save_results_every = 1000,
         checkpoint_every = 10_000,
         num_samples = 16,
         ode_sample_steps = 200,
-        unet_dim = 64,
+        model_kwargs = dict(name="DiT-B/2"), #dict(name="Unet", dim=64)
         use_ema = True,
         ema_update_after_step = 5000,
         ema_update_every = 10,
         ema_beta = 0.999,
         lr = 1e-4,
         adam_weight_decay = 0,
-        clip_values = (-3.0, 3.0),
-        loss_fn = "MSEData_MSENoise_VAE",
+        clip_during_sampling = False,
+        clip_flow_during_sampling = False,
+        clip_flow_values = (-3.0, 3.0),
+        loss_fn = "MSEData_MSEFlow_VAE",
         data_shape = (4, 32, 32),
         dataset = "celebA",
         forward_time_sampling = "logit_normal",

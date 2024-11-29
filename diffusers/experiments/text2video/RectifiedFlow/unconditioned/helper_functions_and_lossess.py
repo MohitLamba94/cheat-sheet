@@ -62,20 +62,6 @@ def cosmap(t):
 # losses
 
 
-class MSEData_MSENoise_VAE(Module):
-    def __init__(self):
-        super().__init__()
-    def forward(self, pred_flow, flow, zt, padded_times, data, **kwargs):
-        noise_loss = F.mse_loss(kwargs['pred_noise'], kwargs['gt_noise'])
-
-        pred_data = zt + (padded_times-1.)*kwargs['pred_noise']
-        pred_data = pred_data/(padded_times+1e-8)
-        pred_data, data = pred_data/kwargs['vae_latent_norm_factor'], data/kwargs['vae_latent_norm_factor']
-        data_loss = F.mse_loss(pred_data, data)
-
-        image_loss = 0*data_loss
-        return data_loss, noise_loss, image_loss 
-    
 class MSEData_MSEFlow_VAE(Module):
     def __init__(self):
         super().__init__()
