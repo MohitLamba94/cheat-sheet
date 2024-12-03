@@ -92,6 +92,10 @@ conda remove --name myenv --all
 conda env export > environment.yaml
 conda env create -f environment.yaml
 
+conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
+# where cuda needs to match torch.version.cuda
+# For updated list see https://anaconda.org/nvidia/cuda-toolkit
+
 
 '''
 Pandas commands
