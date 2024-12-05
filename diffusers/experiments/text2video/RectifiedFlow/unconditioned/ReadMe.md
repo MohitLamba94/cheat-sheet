@@ -1,5 +1,8 @@
 The following results are with Latent Flow Modelling using the original VAE of SD1 on CelebA dataset 256x256 
 
+![novel](https://github.com/user-attachments/assets/c5ddb35e-82d9-4e8e-a60d-4f9a90ffb6d1)
+
+
 
 Model: DiT-B/2  
 Optimisation: Flow  
