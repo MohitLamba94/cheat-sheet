@@ -26,3 +26,13 @@ x_1d_conv = conv1d(rearrange(x_2d_conv, 'b c t h w -> (b h w) c t'))
 x_1d_conv = rearrange(x_1d_conv, '(b h w) c t -> b c t h w', b=B, h=H, w=W)
 print(f"x_1d_conv.shap = {x_1d_conv.shape}")
 # x_1d_conv.shap = torch.Size([2, 8, 2, 5, 6])
+
+'''
+The same can be achieved using 3D convolution
+'''
+B, C, T, H, W = 2, 3, 4, 5, 6
+x = torch.randn(B, C, T, H, W)
+conv3d = nn.Conv3d( in_channels=C, out_channels=8, kernel_size=(3, 3, 3), stride=(2, 1, 1), padding=(1, 1, 1) )
+print(conv3d(x).shape)
+# torch.Size([2, 8, 2, 5, 6])
+
