@@ -80,6 +80,9 @@ chmod -R 777 /home/jack/
 watch -n 1 nvidia-smi
 # displays nvidia-smi every 1 sec
 
+/path/to/train.sh >> /path/to/log 2>&1
+# this command runs the train.sh script and appends both its standard output and error messages to the log file. If file does not exist it will create it.
+
 
 '''
 Conda commands
