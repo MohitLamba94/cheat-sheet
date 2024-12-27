@@ -50,3 +50,41 @@ print(config_dict.app.name) # throws an error
 config_structed = OmegaConf.structured(config_dict)
 print(config_structed.app.name) # works again
 
+
+############# @dataclass decorator ##################
+
+from dataclasses import dataclass
+
+@dataclass(order=True)
+class Point:
+    x: float 
+    y: float = 1.0
+
+p1 = Point(4.0, 5.0)
+p2 = Point(3.0, 4.0)
+
+print(p1)        # Output: Point(x=1.0, y=2.0)
+print(p1 == p2)  # Output: False
+print(p1 >= p2)  # Output: True, with order=False Runtime error
+
+@dataclass(order=False)
+class Point:
+    x: float 
+    y: float = 1.0
+    
+    def __le__(self, other):
+        if not isinstance(other, Point):
+            return NotImplemented
+        return [self.x <= other.x, self.y <= other.y]
+
+p1 = Point(4.0, 5.0)
+p2 = Point(3.0, 4.0)
+
+print(p1)        # Output: Point(x=1.0, y=2.0)
+print(p1 == p2)  # Output: False
+print(p1 >= p2)  # Output: [True,True], No error despite order=False --> not of __le__ used!
+print(p1 <= p2)  # Output: [False,False], __le__ definition used
+
+# The instances of Point class can be converted to OmegaConf data type
+conf = OmegaConf.structured(p1)
+
