@@ -28,3 +28,25 @@ https://github.com/<username>/<repository>/compare/<base-branch>...<compare-bran
 ## General Commands
 - `git status`: Tell the branch, modified files, untracked files, etc
 - `git branch -a`: Lists all the local and remote branches
+- `git log`: Lists the commit history
+- Any file can have following 4 states
+  - Untracked: The file is new and not being tracked by Git.
+  - Unstaged (Modified): The file has been modified in the working directory but has not yet been added to the staging area.
+  - Staged: The file has been added to the staging area and is ready to be committed.
+  - Committed: The changes in the file have been committed to the local repository.
+ 
+## git reset
+```
+git reset [commit]
+```
+- It resets the HEAD to the specified commit.
+- It resets the staging area (index) to match the specified commit.
+- It does not touch the working directory. This means any changes you have made to the files in your working directory will remain.
+
+```
+git reset --hard [commit]
+```
+In addition to above
+- It also resets the working directory to match the specified commit.
+- This means any changes in the working directory and the staging area will be discarded and cannot be recovered.
+
