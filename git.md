@@ -23,3 +23,8 @@ git merge origin/<branch-name>
 ```
 https://github.com/<username>/<repository>/compare/<base-branch>...<compare-branch>
 ```
+
+
+## General Commands
+- `git status`: Tell the branch, modified files, untracked files, etc
+- `git branch -a`: Lists all the local and remote branches
