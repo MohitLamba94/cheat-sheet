@@ -9,13 +9,23 @@ Remove the first line if do not wish to create a new branch
 
 ## Update local branch with the latest changes from the remote branch
 ```
+git checkout <branch-name>
+```
+```
 git fetch origin
-git checkout <branch-name> 
-git reset --hard origin/<branch-name>
-```
-If do not wish to hard reset but wish to manage conflicts use instead
-```
 git merge origin/<branch-name>
+```
+The above can be combined into a single command
+```
+git pull origin <branch-name>
+```
+Fetch is preferred because it allows comparison before merging the remote into the local
+```
+git diff <branch-name> origin/<branch-name>
+```
+If do not wish to manage conflicts and prefer a `hard reset` of remote into local use below instead of `git merge`
+```
+git reset --hard origin/<branch-name>
 ```
 
 
