@@ -60,3 +60,25 @@ In addition to above
 - It also resets the working directory to match the specified commit.
 - This means any changes in the working directory and the staging area will be discarded and cannot be recovered.
 
+## How to make `Feature` branch the `main` branch, rename existing `main` to `OldFeature` and push everything to remote 
+```
+git checkout Feature
+
+# Rename the existing main branch to OldFeature
+git branch -m main OldFeature
+
+# Rename the Feature branch to main
+git branch -m Feature main
+
+# Push the new main branch to the remote? Can this cause Errors???
+git push origin main
+
+# Push the OldFeature branch to the remote repository
+git push origin OldFeature
+
+```
+And perhaps we should use below to avoid errors
+```
+git push -f origin main
+```
+
