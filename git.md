@@ -82,3 +82,12 @@ And perhaps we should use below to avoid errors
 git push -f origin main
 ```
 
+## How to create a backup of GIT repository backing up only files tracked by .git
+```
+mkdir -p path/to/backup
+```
+```
+git ls-files | xargs -I{} cp --parents -v {} path/to/backup
+cp -r .git path/to/backup
+```
+
